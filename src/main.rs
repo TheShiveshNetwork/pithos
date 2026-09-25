@@ -33,9 +33,7 @@ fn run_container(args: Vec<String>) {
 
     extern "C" fn child_trampoline(arg: *mut libc::c_void) -> libc::c_int {
         let args_ptr = arg as *const Vec<String>;
-        unsafe {
-            container_main(&*args_ptr) as libc::c_int
-        }
+        unsafe { container_main(&*args_ptr) as libc::c_int }
     }
 
     unsafe {
@@ -55,4 +53,3 @@ fn run_container(args: Vec<String>) {
         println!("Container exited.");
     }
 }
-
