@@ -3,12 +3,15 @@ use std::ffi::CString;
 
 const MS_REC: u64 = 16384;
 const MS_PRIVATE: u64 = 262144;
+const MNT_DETACH: i32 = 2;
 
 pub fn container_main(args: &Vec<String>, pipe_fd: libc::c_int) -> i32 {
     unsafe {
         let hostname = "pithos";
         let new_root = b"/tmp/pithos\0";
         let proc_dir = b"/tmp/pithos/proc\0";
+        let old_root_relative = b"old_root\0";
+        let old_root_absolute = b"/tmp/pithos/old_root\0";
 
         if libc::sethostname(hostname.as_ptr() as *const libc::c_char, hostname.len()) != 0 {
             println!("Failed to set hostname");
@@ -37,6 +40,22 @@ pub fn container_main(args: &Vec<String>, pipe_fd: libc::c_int) -> i32 {
                 println!("Failed to create root filesystem: {}", error);
                 return 1;
             }
+        }
+
+        // bind mount new_root onto itself to turn it into an official mount point
+        if libc::mount(
+            new_root.as_ptr() as *const libc::c_char,
+            new_root.as_ptr() as *const libc::c_char,
+            std::ptr::null(),
+            libc::MS_BIND | libc::MS_REC,
+            std::ptr::null(),
+        ) != 0
+        {
+            println!(
+                "Failed to self bind-mount new_root: {}",
+                std::io::Error::last_os_error()
+            );
+            return 1;
         }
 
         if libc::mkdir(proc_dir.as_ptr() as *const libc::c_char, 0o555) != 0 {
@@ -77,6 +96,15 @@ pub fn container_main(args: &Vec<String>, pipe_fd: libc::c_int) -> i32 {
             }
         }
 
+        // Create the old_root directory inside new_root
+        if libc::mkdir(old_root_absolute.as_ptr() as *const libc::c_char, 0o700) != 0 {
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() != Some(libc::EEXIST) {
+                println!("Failed to create old_root: {}", error);
+                return 1;
+            }
+        }
+
         if libc::chdir(new_root.as_ptr() as *const libc::c_char) != 0 {
             println!(
                 "Failed to chdir into new root: {}",
@@ -85,8 +113,13 @@ pub fn container_main(args: &Vec<String>, pipe_fd: libc::c_int) -> i32 {
             return 1;
         }
 
-        if libc::chroot(b".\0".as_ptr() as *const libc::c_char) != 0 {
-            println!("chroot failed: {}", std::io::Error::last_os_error());
+        if libc::syscall(
+            libc::SYS_pivot_root,
+            b".\0".as_ptr() as *const libc::c_char,
+            old_root_relative.as_ptr() as *const libc::c_char,
+        ) != 0
+        {
+            println!("pivot_root failed: {}", std::io::Error::last_os_error());
             return 1;
         }
 
@@ -109,6 +142,16 @@ pub fn container_main(args: &Vec<String>, pipe_fd: libc::c_int) -> i32 {
         {
             println!("Failed to mount /proc: {}", std::io::Error::last_os_error());
             return 1;
+        }
+
+        // Unmount old host root filesystem and remove directory
+        if libc::umount2(b"/old_root\0".as_ptr() as *const libc::c_char, MNT_DETACH) != 0 {
+            println!(
+                "Failed to unmount old_root: {}",
+                std::io::Error::last_os_error()
+            );
+        } else {
+            libc::rmdir(b"/old_root\0".as_ptr() as *const libc::c_char);
         }
 
         // BLOCK UNTIL PARENT FINISHES SETTING UP VETH PAIR
