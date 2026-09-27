@@ -5,6 +5,59 @@ const MS_REC: u64 = 16384;
 const MS_PRIVATE: u64 = 262144;
 const MNT_DETACH: i32 = 2;
 
+fn run_init_reaper(args: &Vec<String>) -> i32 {
+    unsafe {
+        let target_pid = libc::fork();
+
+        if target_pid < 0 {
+            println!("Fork failed inside init process: {}", std::io::Error::last_os_error());
+            return 1;
+        }
+
+        if target_pid == 0 {
+            let c_args: Vec<CString> = args
+                .iter()
+                .map(|s| CString::new(s.as_str()).unwrap())
+                .collect();
+
+            let mut argv: Vec<*const libc::c_char> = c_args.iter().map(|arg| arg.as_ptr()).collect();
+            argv.push(std::ptr::null());
+
+            std::env::set_var("PS1", "\\u@\\h:\\w\\$ ");
+            libc::execvp(c_args[0].as_ptr(), argv.as_ptr());
+
+            println!("execvp failed: {}", std::io::Error::last_os_error());
+            libc::_exit(1);
+        }
+
+        let mut exit_code = 0;
+
+        loop {
+            let mut status: libc::c_int = 0;
+
+            let reaped_pid = libc::waitpid(-1, &mut status, 0);
+
+            if reaped_pid <= 0 {
+                let err = std::io::Error::last_os_error();
+                if err.raw_os_error() == Some(libc::ECHILD) {
+                    break;
+                }
+                continue;
+            }
+
+            if reaped_pid == target_pid {
+                if libc::WIFEXITED(status) {
+                    exit_code = libc::WEXITSTATUS(status);
+                } else if libc::WIFSIGNALED(status) {
+                    exit_code = 128 + libc::WTERMSIG(status);
+                }
+            }
+        }
+
+        exit_code
+    }
+}
+
 pub fn container_main(args: &Vec<String>, pipe_fd: libc::c_int) -> i32 {
     unsafe {
         let hostname = "pithos";
@@ -165,19 +218,6 @@ pub fn container_main(args: &Vec<String>, pipe_fd: libc::c_int) -> i32 {
             return 1;
         }
 
-        let c_args: Vec<CString> = args
-            .iter()
-            .map(|s| CString::new(s.as_str()).unwrap())
-            .collect();
-
-        let mut argv: Vec<*const libc::c_char> = c_args.iter().map(|arg| arg.as_ptr()).collect();
-        argv.push(std::ptr::null());
-
-        std::env::set_var("PS1", "\\u@\\h:\\w\\$ ");
-
-        libc::execvp(c_args[0].as_ptr(), argv.as_ptr());
-        println!("execvp failed: {}", std::io::Error::last_os_error());
+        run_init_reaper(args)
     }
-
-    1
 }

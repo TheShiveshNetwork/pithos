@@ -5,7 +5,7 @@
 
 [x] Network isolation
 
-[] PID namespace fix: currently clone() child becomes PID 1 but PID 1 realistically has a special responsibility: reap orphaned / zombie processes
+[x] PID namespace fix: currently clone() child becomes PID 1 but PID 1 realistically has a special responsibility: reap orphaned / zombie processes
 
 [x] Replace chroot with pivot_root for safety
 
