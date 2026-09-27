@@ -11,7 +11,7 @@
 
 [x] Implement real rootfs
 
-[] Add cgroups
+[x] Add cgroups
 
 [] Implment user namespaces
 

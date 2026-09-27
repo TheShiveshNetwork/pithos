@@ -1,12 +1,13 @@
 use std::env;
 
 mod container;
-use container::container_main;
-
 mod network;
-use network::setup_network;
-
 mod filesystem;
+mod cgroups;
+
+use cgroups::CgroupManager;
+use network::setup_network;
+use container::container_main;
 
 const CLONE_NEWNS: i32 = 0x00020000;
 const CLONE_NEWUTS: i32 = 0x04000000;
@@ -78,6 +79,28 @@ fn run_container(args: Vec<String>) {
         // 2. Setup host side network & move interface to child namespace
         if let Err(error) = setup_network(child_pid) {
             panic!("Failed to setup container network: {:?}", error);
+        }
+
+        // Setup cgroups v2 limits on the host for child_pid
+        match CgroupManager::new(child_pid) {
+            Ok(cgroup) => {
+                if let Err(e) = cgroup.attach_pid(child_pid) {
+                    eprintln!("Failed to attach PID to cgroup: {}", e);
+                }
+                // Limit memory to 256 MB
+                if let Err(e) = cgroup.set_memory_limit(256 * 1024 * 1024) {
+                    eprintln!("Failed to set memory limit: {}", e);
+                }
+                // Limit max process count (prevents fork bombs)
+                if let Err(e) = cgroup.set_pids_limit(100) {
+                    eprintln!("Failed to set PIDs limit: {}", e);
+                }
+                // Limit CPU usage to 50% of one core
+                if let Err(e) = cgroup.set_cpu_limit(50000, 100000) {
+                    eprintln!("Failed to set CPU limit: {}", e);
+                }
+            }
+            Err(e) => eprintln!("Failed to initialize cgroup: {}", e),
         }
 
         // 3. Signal child that network is ready
