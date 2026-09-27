@@ -9,7 +9,7 @@
 
 [x] Replace chroot with pivot_root for safety
 
-[] Implement real rootfs
+[x] Implement real rootfs
 
 [] Add cgroups
 

@@ -6,6 +6,8 @@ use container::container_main;
 mod network;
 use network::setup_network;
 
+mod filesystem;
+
 const CLONE_NEWNS: i32 = 0x00020000;
 const CLONE_NEWUTS: i32 = 0x04000000;
 const CLONE_NEWPID: i32 = 0x20000000;
